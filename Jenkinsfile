@@ -1,4 +1,3 @@
-
 pipeline {
     agent any
 
@@ -21,17 +20,18 @@ pipeline {
             steps {
                 script {
                     env.VERSION = sh(
-            script: 'git rev-parse --short HEAD',
-            returnStdout: true
-          ).trim()
+                        script: 'git rev-parse --short HEAD',
+                        returnStdout: true
+                    ).trim()
                     echo "Version (Commit SHA): ${env.VERSION}"
                 }
             }
         }
-   
+
         stage('Upload to S3 (Versioned Path)') {
             steps {
-                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-poc-creds']]) {
+                withCredentials([$class: 'AmazonWebServicesCredentialsBinding', \
+                credentialsId: 'aws-poc-creds']) {
                     sh """
         set -e
         export AWS_DEFAULT_REGION=${AWS_REGION}
@@ -55,11 +55,14 @@ pipeline {
 
         stage('Verify Upload') {
             steps {
-                sh """
-          export AWS_DEFAULT_REGION=${AWS_REGION}
-          aws s3 ls s3://${BUCKET}/${ENV}/${VERSION}/sql/
-          aws s3 ls s3://${BUCKET}/${ENV}/${VERSION}/parameters/
-        """
+                withCredentials([$class: 'AmazonWebServicesCredentialsBinding', \
+                credentialsId: 'aws-poc-creds']) {
+                    sh """
+                        export AWS_DEFAULT_REGION=${AWS_REGION}
+                        aws s3 ls s3://${BUCKET}/${ENV}/${VERSION}/sql/
+                        aws s3 ls s3://${BUCKET}/${ENV}/${VERSION}/parameters/
+                    """
+                }
             }
         }
     }
