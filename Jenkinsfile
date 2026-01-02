@@ -1,78 +1,75 @@
 pipeline {
-    agent any
+  agent any
 
-    environment {
-        AWS_REGION = 'ap-south-1'
-        BUCKET     = 'dine-test-vc-jan'
-        ENV        = 'dev'
-        REPO_URL   = 'https://github.com/rrj-bit-211/dine-cicd-test.git' // <-- change
-        BRANCH     = 'master'                                      // <-- or main
+  environment {
+    AWS_REGION = "ap-south-1"
+    BUCKET     = "dine-test-vc-jan"  // If BUCKET comes from your ts3/env, keep this var name and value injected at runtime
+  }
+
+  stages {
+
+    stage('Checkout Code') {
+      steps {
+        // Change branch to 'main' if your repo uses main
+        git branch: 'master',
+            url: 'https://github.com/rrj-bit-211/dine-cicd-test.git'
+      }
     }
 
-    stages {
-        stage('Checkout Code') {
-            steps {
-                git branch: env.BRANCH, url: env.REPO_URL
-            }
-        }
+    stage('Preflight Checks') {
+      steps {
+        sh """
+          set -e
+          command -v aws >/dev/null 2>&1 || { echo 'AWS CLI not found on agent PATH'; exit 1; }
+          command -v git >/dev/null 2>&1 || { echo 'Git not found on agent PATH'; exit 1; }
 
-        stage('Determine Version (Commit SHA)') {
-            steps {
-                script {
-                    env.VERSION = sh(
-                        script: 'git rev-parse --short HEAD',
-                        returnStdout: true
-                    ).trim()
-                    echo "Version (Commit SHA): ${env.VERSION}"
-                }
-            }
-        }
-
-        stage('Upload to S3 (Versioned Path)') {
-            steps {
-                withCredentials([$class: 'AmazonWebServicesCredentialsBinding', \
-                credentialsId: 'aws-poc-creds']) {
-                    sh """
-        set -e
-        export AWS_DEFAULT_REGION=${AWS_REGION}
-
-        if [ -d sql ]; then
-          aws s3 sync sql/ s3://${BUCKET}/${ENV}/${VERSION}/sql/ --delete
-        else
-          echo "Skipping: sql/ not found"
-        fi
-
-        if [ -d parameters ]; then
-          aws s3 sync parameters/ s3://${BUCKET}/${ENV}/${VERSION}/parameters/ --delete
-        else
-          echo "Skipping: parameters/ not found"
-        fi
-      """
-                }
-            }
-        }
-
-
-        stage('Verify Upload') {
-            steps {
-                withCredentials([$class: 'AmazonWebServicesCredentialsBinding', \
-                credentialsId: 'aws-poc-creds']) {
-                    sh """
-                        export AWS_DEFAULT_REGION=${AWS_REGION}
-                        aws s3 ls s3://${BUCKET}/${ENV}/${VERSION}/sql/
-                        aws s3 ls s3://${BUCKET}/${ENV}/${VERSION}/parameters/
-                    """
-                }
-            }
-        }
+          # Confirm source folder exists in the checked-out repo
+          test -d de-etl-prod/pos/guestcheck || { echo 'Missing folder: de-etl-prod/pos/guestcheck'; exit 1; }
+        """
+      }
     }
 
-    post {
-        success {
-            echo "POC upload completed for version ${env.VERSION}"
+    stage('First-time Upload to S3 (No Versioning)') {
+      steps {
+        withCredentials([[
+          $class: 'AmazonWebServicesCredentialsBinding',
+          credentialsId: 'aws-poc-creds',
+          accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+          secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+        ]]) {
+          sh """
+            set -e
+            aws sts get-caller-identity
+            # Sync the specific folder to the bucket root path (no ENV/version prefix)
+            aws s3 sync de-etl-prod/pos/guestcheck/ \
+              s3://${BUCKET}/de-etl-prod/pos/guestcheck/ \
+              --region ${AWS_REGION} \
+              --exclude ".git/*" --exclude ".github/*" --exclude ".gitignore"
+
+            echo "Uploaded: de-etl-prod/pos/guestcheck -> s3://${BUCKET}/de-etl-prod/pos/guestcheck/"
+          """
         }
-        failure {
-            echo 'POC upload failed. Check console logs for details.'
-        }
+      }
     }
+
+    stage('Verify Upload') {
+      steps {
+       withCredentials([[
+        $class: 'AmazonWebServicesCredentialsBinding',
+        credentialsId: 'aws-poc-creds',
+        accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+        secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+    ]]) {  
+        sh """
+          aws s3 ls s3://${BUCKET}/de-etl-prod/pos/guestcheck/ --recursive --region ${AWS_REGION}
+        """
+      }
+    }
+  }
+  }
+
+  post {
+    success { echo "✅ First-time upload finished: s3://${BUCKET}/de-etl-prod/pos/guestcheck/" }
+    failure { echo "❌ Upload failed. Check agent tools, IAM permissions, repo path, or bucket name." }
+  }
 }
