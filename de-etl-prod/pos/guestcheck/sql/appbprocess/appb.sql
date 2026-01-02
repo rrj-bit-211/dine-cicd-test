@@ -1,0 +1,1 @@
+SELECT 'Sample message displayed in SQL' AS message;
