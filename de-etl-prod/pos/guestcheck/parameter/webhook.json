@@ -1,0 +1,18 @@
+{
+    "webhook": {
+        "url": "https://example.com/webhook",
+        "method": "POST",
+        "headers": {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer YOUR_TOKEN"
+        },
+        "payload": {
+            "message": "Test message",
+            "event": "test_event"
+        },
+        "retry": {
+            "enabled": true,
+            "maxAttempts": 3
+        }
+    }
+}
